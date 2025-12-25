@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
-// Diğer ekranları içeri aktarıyoruz
+// Sayfalar
 import 'inventory_screen.dart';
 import 'shipments_screen.dart';
 import 'analysis_screen.dart';
 import 'profile_screen.dart';
+import 'login_screen.dart'; // Çıkış yapınca dönmek için
 
 class MainNavigationWrapper extends StatefulWidget {
   const MainNavigationWrapper({super.key});
@@ -14,29 +17,100 @@ class MainNavigationWrapper extends StatefulWidget {
 }
 
 class _MainNavigationWrapperState extends State<MainNavigationWrapper> {
-  int _selectedIndex = 0; // Varsayılan olarak ilk sayfa (Envanter) açık
+  int _selectedIndex = 0;
+  String _userRole = "loading"; // Başlangıçta yükleniyor
 
-  // Sayfaların Listesi
-  final List<Widget> _pages = [
-    InventoryScreen(), // 0: Envanter
-    ShipmentsScreen(), // 1: Sevkiyat
-    AnalysisScreen(), // 2: Analiz (Dashboard)
-    ProfileScreen(), // 3: Profil/Ayarlar
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _fetchUserRole();
+  }
+
+  // Kullanıcının rolünü veritabanından çek
+  Future<void> _fetchUserRole() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      try {
+        DocumentSnapshot doc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
+        if (doc.exists) {
+          setState(() {
+            _userRole =
+                doc['role'] ??
+                'personel'; // Eğer rol yazmıyorsa güvenli olarak 'personel' varsay
+          });
+        } else {
+          // Eski kullanıcılarda rol yoksa varsayılan personel yap
+          setState(() => _userRole = 'personel');
+        }
+      } catch (e) {
+        print("Rol çekme hatası: $e");
+        setState(() => _userRole = 'personel');
+      }
+    }
+  }
 
   void _onItemTapped(int index) {
-    setState(() {
-      _selectedIndex = index;
-    });
+    setState(() => _selectedIndex = index);
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      // Seçili sayfayı gövdeye yerleştir
-      body: _pages[_selectedIndex],
+    // Rol yüklenene kadar bekle
+    if (_userRole == "loading") {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
 
-      // Alt Menü Tasarımı
+    // --- SAYFA LİSTESİ (Role Göre Değişir) ---
+    List<Widget> pages = [];
+    List<BottomNavigationBarItem> navItems = [];
+
+    // 1. Envanter (Herkes görür ama içine rolü gönderiyoruz)
+    pages.add(InventoryScreen(userRole: _userRole));
+    navItems.add(
+      const BottomNavigationBarItem(
+        icon: Icon(Icons.inventory_2_outlined),
+        activeIcon: Icon(Icons.inventory_2),
+        label: 'Envanter',
+      ),
+    );
+
+    // 2. Sevkiyat (Herkes görür)
+    pages.add(const ShipmentsScreen());
+    navItems.add(
+      const BottomNavigationBarItem(
+        icon: Icon(Icons.local_shipping_outlined),
+        activeIcon: Icon(Icons.local_shipping),
+        label: 'Sevkiyat',
+      ),
+    );
+
+    // 3. Analiz (SADECE ADMIN GÖRÜR)
+    if (_userRole == 'admin') {
+      pages.add(const AnalysisScreen());
+      navItems.add(
+        const BottomNavigationBarItem(
+          icon: Icon(Icons.analytics_outlined),
+          activeIcon: Icon(Icons.analytics),
+          label: 'Analiz',
+        ),
+      );
+    }
+
+    // 4. Profil (Herkes görür)
+    pages.add(const ProfileScreen());
+    navItems.add(
+      const BottomNavigationBarItem(
+        icon: Icon(Icons.person_outline),
+        activeIcon: Icon(Icons.person),
+        label: 'Hesabım',
+      ),
+    );
+
+    return Scaffold(
+      body: pages[_selectedIndex],
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           boxShadow: [
@@ -50,34 +124,12 @@ class _MainNavigationWrapperState extends State<MainNavigationWrapper> {
         child: BottomNavigationBar(
           currentIndex: _selectedIndex,
           onTap: _onItemTapped,
-          type: BottomNavigationBarType
-              .fixed, // 4 buton olduğu için 'fixed' olmalı
+          type: BottomNavigationBarType.fixed,
           backgroundColor: Colors.white,
-          selectedItemColor: const Color(0xFF0055FF), // Senin temanın ana rengi
+          selectedItemColor: const Color(0xFF0055FF),
           unselectedItemColor: Colors.grey,
           showUnselectedLabels: true,
-          items: const [
-            BottomNavigationBarItem(
-              icon: Icon(Icons.inventory_2_outlined),
-              activeIcon: Icon(Icons.inventory_2),
-              label: 'Envanter',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.local_shipping_outlined),
-              activeIcon: Icon(Icons.local_shipping),
-              label: 'Sevkiyat',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.analytics_outlined),
-              activeIcon: Icon(Icons.analytics),
-              label: 'Analiz',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.person_outline),
-              activeIcon: Icon(Icons.person),
-              label: 'Hesabım',
-            ),
-          ],
+          items: navItems,
         ),
       ),
     );
