@@ -1,8 +1,8 @@
-import 'dart:io'; // Dosya işlemleri için gerekli
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:file_picker/file_picker.dart'; // Dosya seçmek için
-import 'package:excel/excel.dart'; // Excel okumak için
+import 'package:file_picker/file_picker.dart';
+import 'package:excel/excel.dart';
 import 'product_form_screen.dart';
 import 'inventory_movements_screen.dart';
 import 'scanner_screen.dart';
@@ -21,6 +21,7 @@ class _InventoryScreenState extends State<InventoryScreen>
   @override
   bool get wantKeepAlive => true;
 
+  // --- ARAMA & KATEGORİ ---
   String _searchQuery = "";
   String _selectedCategoryFilter = "Tümü";
   final List<String> _filterCategories = [
@@ -35,10 +36,17 @@ class _InventoryScreenState extends State<InventoryScreen>
     "Diğer",
   ];
 
+  // --- YENİ EKLENEN: GELİŞMİŞ FİLTRE DEĞİŞKENLERİ ---
+  String _sortType = 'tarih'; // 'tarih', 'fiyat', 'stok'
+  bool _sortAscending = false; // Artan mı Azalan mı?
+  String _stockStatusFilter = 'hepsi'; // 'hepsi', 'kritik', 'tukenen'
+  RangeValues _priceRange = const RangeValues(0, 50000); // Fiyat Aralığı
+
   final CollectionReference _inventoryRef = FirebaseFirestore.instance
       .collection('inventory');
-  bool _isImporting = false; // Yükleme sırasında loading göstermek için
+  bool _isImporting = false;
 
+  // --- SAYFA YÖNLENDİRMELERİ ---
   void _addOrEdit({Map<String, dynamic>? product, String? docId}) {
     Navigator.push(
       context,
@@ -64,9 +72,240 @@ class _InventoryScreenState extends State<InventoryScreen>
     }
   }
 
-  // --- EXCEL'DEN TOPLU VERİ ALMA (IMPORT) ---
+  // --- FİLTRE MENÜSÜNÜ AÇ (BOTTOM SHEET) ---
+  void _openFilterSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true, // Tam ekran boyu için
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        // BottomSheet içinde State değiştirmek için StatefulBuilder şart
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setModalState) {
+            return Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey[300],
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // 1. SIRALAMA
+                  const Text(
+                    "Sıralama",
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 10,
+                    children: [
+                      _buildSortChip("En Yeni", 'tarih', false, setModalState),
+                      _buildSortChip(
+                        "Fiyat (Artan)",
+                        'fiyat',
+                        true,
+                        setModalState,
+                      ),
+                      _buildSortChip(
+                        "Fiyat (Azalan)",
+                        'fiyat',
+                        false,
+                        setModalState,
+                      ),
+                      _buildSortChip(
+                        "Stok (Azalan)",
+                        'stok',
+                        false,
+                        setModalState,
+                      ),
+                      _buildSortChip(
+                        "Stok (Artan)",
+                        'stok',
+                        true,
+                        setModalState,
+                      ),
+                    ],
+                  ),
+                  const Divider(height: 30),
+
+                  // 2. STOK DURUMU
+                  const Text(
+                    "Stok Durumu",
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      _buildFilterChip(
+                        "Hepsi",
+                        'hepsi',
+                        _stockStatusFilter,
+                        (val) => setModalState(() => _stockStatusFilter = val),
+                      ),
+                      const SizedBox(width: 10),
+                      _buildFilterChip(
+                        "Kritik (<10)",
+                        'kritik',
+                        _stockStatusFilter,
+                        (val) => setModalState(() => _stockStatusFilter = val),
+                      ),
+                      const SizedBox(width: 10),
+                      _buildFilterChip(
+                        "Tükenenler",
+                        'tukenen',
+                        _stockStatusFilter,
+                        (val) => setModalState(() => _stockStatusFilter = val),
+                      ),
+                    ],
+                  ),
+                  const Divider(height: 30),
+
+                  // 3. FİYAT ARALIĞI
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        "Fiyat Aralığı",
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
+                      Text(
+                        "${_priceRange.start.toInt()} ₺ - ${_priceRange.end.toInt()} ₺",
+                        style: const TextStyle(
+                          color: Colors.blue,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  RangeSlider(
+                    values: _priceRange,
+                    min: 0,
+                    max: 50000,
+                    divisions: 100,
+                    activeColor: const Color(0xFF0055FF),
+                    labels: RangeLabels(
+                      "${_priceRange.start.toInt()} ₺",
+                      "${_priceRange.end.toInt()} ₺",
+                    ),
+                    onChanged: (RangeValues values) {
+                      setModalState(() {
+                        _priceRange = values;
+                      });
+                    },
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // UYGULA BUTONU
+                  SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF0055FF),
+                      ),
+                      onPressed: () {
+                        setState(() {}); // Ana ekranı güncelle
+                        Navigator.pop(context); // Kapat
+                      },
+                      child: const Text(
+                        "FİLTRELERİ UYGULA",
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  // SIFIRLA BUTONU
+                  Center(
+                    child: TextButton(
+                      onPressed: () {
+                        setModalState(() {
+                          _sortType = 'tarih';
+                          _sortAscending = false;
+                          _stockStatusFilter = 'hepsi';
+                          _priceRange = const RangeValues(0, 50000);
+                        });
+                      },
+                      child: const Text(
+                        "Sıfırla",
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // Yardımcı Widget: Sıralama Chip'i
+  Widget _buildSortChip(
+    String label,
+    String type,
+    bool ascending,
+    StateSetter setModalState,
+  ) {
+    bool isSelected = _sortType == type && _sortAscending == ascending;
+    return ChoiceChip(
+      label: Text(label),
+      selected: isSelected,
+      selectedColor: const Color(0xFF0055FF).withOpacity(0.2),
+      labelStyle: TextStyle(
+        color: isSelected ? const Color(0xFF0055FF) : Colors.black,
+      ),
+      onSelected: (bool selected) {
+        setModalState(() {
+          _sortType = type;
+          _sortAscending = ascending;
+        });
+      },
+    );
+  }
+
+  // Yardımcı Widget: Filtre Chip'i
+  Widget _buildFilterChip(
+    String label,
+    String value,
+    String groupValue,
+    Function(String) onSelected,
+  ) {
+    bool isSelected = groupValue == value;
+    return ChoiceChip(
+      label: Text(label),
+      selected: isSelected,
+      selectedColor: Colors.orange.withOpacity(0.2),
+      labelStyle: TextStyle(
+        color: isSelected ? Colors.orange[800] : Colors.black,
+      ),
+      onSelected: (bool selected) {
+        if (selected) onSelected(value);
+      },
+    );
+  }
+
+  // --- EXCEL IMPORT ---
   Future<void> _importFromExcel() async {
-    // 1. Yetki Kontrolü
     if (widget.userRole != 'admin') {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -77,65 +316,51 @@ class _InventoryScreenState extends State<InventoryScreen>
       return;
     }
 
-    // 2. Kullanıcıya Bilgi Ver
     await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("Excel Formatı Nasıl Olmalı?"),
+        title: const Text("Excel Formatı"),
         content: const Text(
-          "Excel dosyanızda sütunlar sırasıyla şöyle olmalıdır:\n\n1. Ürün Adı\n2. SKU (Barkod)\n3. Kategori\n4. Stok Adedi\n5. Fiyat\n\nBaşlık satırı (ilk satır) okunmaz, veriler 2. satırdan başlamalıdır.",
+          "1. Ürün Adı\n2. SKU\n3. Kategori\n4. Stok\n5. Fiyat\n\n(İlk satır başlık olmalı)",
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text("Tamam, Dosya Seç"),
+            child: const Text("Dosya Seç"),
           ),
         ],
       ),
     );
 
-    // 3. Dosya Seçimi
     FilePickerResult? result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
-      allowedExtensions: ['xlsx'], // Sadece yeni Excel formatı
+      allowedExtensions: ['xlsx'],
     );
 
     if (result != null) {
       setState(() => _isImporting = true);
-
       try {
         File file = File(result.files.single.path!);
         var bytes = file.readAsBytesSync();
         var excel = Excel.decodeBytes(bytes);
-
-        // İlk sayfayı al
         var table = excel.tables[excel.tables.keys.first];
 
-        int count = 0;
         final firestore = FirebaseFirestore.instance;
-        WriteBatch batch = firestore.batch(); // Toplu yazma işlemi için Batch
+        WriteBatch batch = firestore.batch();
+        int count = 0;
 
-        // Satırları Dön (İlk satır başlık olduğu için atlıyoruz, i=1 diyoruz ama kütüphane yapısına göre değişebilir, genellikle row loop kullanırız)
-        // Excel kütüphanesinde rows bir listedir.
         for (var i = 1; i < table!.rows.length; i++) {
           var row = table.rows[i];
-
-          // Boş satır koruması
           if (row.isEmpty || row[0] == null) continue;
 
-          // Verileri Hücrelerden Al (Güvenli Dönüşüm)
-          // row[0] -> Ad, row[1] -> SKU, row[2] -> Kategori, row[3] -> Stok, row[4] -> Fiyat
-          String name = row[0]?.value?.toString() ?? "İsimsiz Ürün";
+          String name = row[0]?.value?.toString() ?? "İsimsiz";
           String sku = row[1]?.value?.toString() ?? "";
           String category = row[2]?.value?.toString() ?? "Genel";
           int stock = int.tryParse(row[3]?.value?.toString() ?? "0") ?? 0;
           double price =
               double.tryParse(row[4]?.value?.toString() ?? "0") ?? 0.0;
 
-          // Yeni Doküman Referansı
           DocumentReference newDocRef = _inventoryRef.doc();
-
-          // Batch'e Ekle (Envanter Kaydı)
           batch.set(newDocRef, {
             "name": name,
             "sku": sku,
@@ -143,15 +368,10 @@ class _InventoryScreenState extends State<InventoryScreen>
             "stock": stock,
             "price": price,
             "createdAt": FieldValue.serverTimestamp(),
-            "updatedAt": FieldValue.serverTimestamp(),
           });
 
-          // Batch'e Ekle (Hareket Kaydı - Giriş Logu)
           if (stock > 0) {
-            DocumentReference movRef = firestore
-                .collection('inventory_movements')
-                .doc();
-            batch.set(movRef, {
+            batch.set(firestore.collection('inventory_movements').doc(), {
               "type": "Giriş",
               "productName": "$name (Excel)",
               "sku": sku,
@@ -161,95 +381,93 @@ class _InventoryScreenState extends State<InventoryScreen>
           }
 
           count++;
-
-          // Firestore Batch limiti 500'dür. Eğer 400'e ulaşırsak commit yapıp sıfırlayalım.
           if (count % 400 == 0) {
             await batch.commit();
             batch = firestore.batch();
           }
         }
-
-        // Kalanları yaz
         await batch.commit();
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text("$count adet ürün başarıyla yüklendi!"),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
-      } catch (e) {
         if (mounted)
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text("Hata oluştu: $e"),
-              backgroundColor: Colors.red,
+              content: Text("$count ürün yüklendi!"),
+              backgroundColor: Colors.green,
             ),
           );
-        debugPrint("Excel Import Hatası: $e");
+      } catch (e) {
+        debugPrint("Hata: $e");
       } finally {
         if (mounted) setState(() => _isImporting = false);
       }
     }
   }
 
-  // --- SİLME FONKSİYONU ---
   void _deleteProduct(String docId, Map<String, dynamic> item) async {
     if (widget.userRole != 'admin') {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("Yetkiniz yok! Sadece yöneticiler ürün silebilir."),
+          content: Text("Sadece admin silebilir!"),
           backgroundColor: Colors.red,
         ),
       );
       return;
     }
-
     int stock = int.tryParse(item['stock'].toString()) ?? 0;
     if (stock > 0) {
       await FirebaseFirestore.instance.collection('inventory_movements').add({
         "type": "Çıkış",
         "productName": "${item['name']} (Silindi)",
-        "sku": item['sku'] ?? "-",
+        "sku": item['sku'],
         "quantity": stock,
         "date": FieldValue.serverTimestamp(),
       });
     }
     _inventoryRef.doc(docId).delete();
-    if (mounted)
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text("Ürün silindi.")));
   }
 
   @override
   Widget build(BuildContext context) {
     super.build(context);
-
     return Scaffold(
       appBar: AppBar(
         title: const Text("Envanter"),
         actions: [
-          // 1. Excel Import Butonu (SADECE ADMIN)
           if (widget.userRole == 'admin')
             IconButton(
               icon: _isImporting
                   ? const SizedBox(
                       width: 20,
                       height: 20,
-                      child: CircularProgressIndicator(
-                        color: Colors.green,
-                        strokeWidth: 2,
-                      ),
+                      child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.upload_file, color: Colors.green),
-              tooltip: "Excel'den Yükle",
               onPressed: _isImporting ? null : _importFromExcel,
             ),
-
-          // 2. Diğer Butonlar
+          // --- YENİ FİLTRE BUTONU ---
+          IconButton(
+            icon: Stack(
+              children: [
+                const Icon(Icons.filter_list),
+                if (_stockStatusFilter != 'hepsi' ||
+                    _sortType != 'tarih' ||
+                    _priceRange.end != 50000)
+                  Positioned(
+                    right: 0,
+                    top: 0,
+                    child: Container(
+                      width: 8,
+                      height: 8,
+                      decoration: const BoxDecoration(
+                        color: Colors.red,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            tooltip: "Filtrele ve Sırala",
+            onPressed: _openFilterSheet,
+          ),
           IconButton(
             icon: const Icon(Icons.history),
             onPressed: () => Navigator.push(
@@ -258,10 +476,6 @@ class _InventoryScreenState extends State<InventoryScreen>
                 builder: (context) => const InventoryMovementsScreen(),
               ),
             ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.qr_code_scanner),
-            onPressed: _scanAndAddProduct,
           ),
           IconButton(
             icon: const Icon(Icons.add),
@@ -288,8 +502,7 @@ class _InventoryScreenState extends State<InventoryScreen>
               ),
             ),
           ),
-
-          // Kategori Filtresi
+          // Kategori
           SizedBox(
             height: 50,
             child: ListView.builder(
@@ -316,40 +529,77 @@ class _InventoryScreenState extends State<InventoryScreen>
               },
             ),
           ),
-
           const Divider(),
 
-          // Liste
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
               stream: _inventoryRef
-                  .orderBy('createdAt', descending: true)
-                  .snapshots(),
+                  .snapshots(), // Hepsini çekip client-side filtreliyoruz
               builder: (context, snapshot) {
                 if (!snapshot.hasData)
                   return const Center(child: CircularProgressIndicator());
-                final allDocs = snapshot.data!.docs;
 
-                final filteredDocs = allDocs.where((doc) {
-                  final data = doc.data() as Map<String, dynamic>;
-                  final name = (data['name'] ?? "").toString().toLowerCase();
-                  final sku = (data['sku'] ?? "").toString().toLowerCase();
-                  final category = (data['category'] ?? "Genel").toString();
+                // 1. LİSTEYİ OLUŞTUR
+                var docs = snapshot.data!.docs;
+                List<DocumentSnapshot> filteredList = [];
 
-                  bool textMatch =
-                      name.contains(_searchQuery) || sku.contains(_searchQuery);
-                  bool categoryMatch =
-                      _selectedCategoryFilter == "Tümü" ||
-                      category == _selectedCategoryFilter;
-                  return textMatch && categoryMatch;
-                }).toList();
+                for (var doc in docs) {
+                  var data = doc.data() as Map<String, dynamic>;
+                  String name = (data['name'] ?? "").toString().toLowerCase();
+                  String sku = (data['sku'] ?? "").toString().toLowerCase();
+                  String category = (data['category'] ?? "Genel").toString();
+                  int stock = int.tryParse(data['stock'].toString()) ?? 0;
+                  double price =
+                      double.tryParse(data['price'].toString()) ?? 0.0;
 
-                int totalProduct = filteredDocs.length;
+                  // 2. FİLTRELERİ UYGULA
+                  // Arama
+                  if (!name.contains(_searchQuery) &&
+                      !sku.contains(_searchQuery))
+                    continue;
+                  // Kategori
+                  if (_selectedCategoryFilter != "Tümü" &&
+                      category != _selectedCategoryFilter)
+                    continue;
+                  // Stok Durumu
+                  if (_stockStatusFilter == 'kritik' && stock >= 10) continue;
+                  if (_stockStatusFilter == 'tukenen' && stock > 0) continue;
+                  // Fiyat Aralığı
+                  if (price < _priceRange.start || price > _priceRange.end)
+                    continue;
+
+                  filteredList.add(doc);
+                }
+
+                // 3. SIRALAMA
+                filteredList.sort((a, b) {
+                  var dA = a.data() as Map<String, dynamic>;
+                  var dB = b.data() as Map<String, dynamic>;
+
+                  if (_sortType == 'fiyat') {
+                    double pA = double.tryParse(dA['price'].toString()) ?? 0;
+                    double pB = double.tryParse(dB['price'].toString()) ?? 0;
+                    return _sortAscending ? pA.compareTo(pB) : pB.compareTo(pA);
+                  } else if (_sortType == 'stok') {
+                    int sA = int.tryParse(dA['stock'].toString()) ?? 0;
+                    int sB = int.tryParse(dB['stock'].toString()) ?? 0;
+                    return _sortAscending ? sA.compareTo(sB) : sB.compareTo(sA);
+                  } else {
+                    // Tarih (Varsayılan)
+                    Timestamp tA = dA['createdAt'] ?? Timestamp.now();
+                    Timestamp tB = dB['createdAt'] ?? Timestamp.now();
+                    return tB.compareTo(
+                      tA,
+                    ); // Hep en yeni en üstte olsun default olarak
+                  }
+                });
+
+                int totalProduct = filteredList.length;
                 int lowStock = 0;
-                for (var doc in filteredDocs) {
-                  final d = doc.data() as Map<String, dynamic>;
-                  int s = int.tryParse(d['stock'].toString()) ?? 0;
-                  if (s < 10) lowStock++;
+                for (var doc in filteredList) {
+                  var d = doc.data() as Map<String, dynamic>;
+                  if ((int.tryParse(d['stock'].toString()) ?? 0) < 10)
+                    lowStock++;
                 }
 
                 return Column(
@@ -363,7 +613,7 @@ class _InventoryScreenState extends State<InventoryScreen>
                         children: [
                           Expanded(
                             child: _buildInfoCard(
-                              "Gösterilen",
+                              "Sonuç",
                               "$totalProduct",
                               Colors.blue,
                             ),
@@ -379,20 +629,20 @@ class _InventoryScreenState extends State<InventoryScreen>
                         ],
                       ),
                     ),
-
                     Expanded(
-                      child: filteredDocs.isEmpty
-                          ? const Center(child: Text("Ürün bulunamadı."))
+                      child: filteredList.isEmpty
+                          ? const Center(
+                              child: Text("Filtrelere uygun ürün yok."),
+                            )
                           : ListView.builder(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 16,
                                 vertical: 10,
                               ),
-                              itemCount: filteredDocs.length,
+                              itemCount: filteredList.length,
                               itemBuilder: (context, index) {
-                                final doc = filteredDocs[index];
-                                final item = doc.data() as Map<String, dynamic>;
-                                final category = item['category'] ?? "Genel";
+                                var doc = filteredList[index];
+                                var item = doc.data() as Map<String, dynamic>;
 
                                 Widget cardContent = Card(
                                   margin: const EdgeInsets.only(bottom: 10),
@@ -412,33 +662,10 @@ class _InventoryScreenState extends State<InventoryScreen>
                                         fontWeight: FontWeight.bold,
                                       ),
                                     ),
-                                    subtitle: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(item['sku'] ?? "-"),
-                                        Container(
-                                          margin: const EdgeInsets.only(top: 4),
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 6,
-                                            vertical: 2,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: Colors.grey[200],
-                                            borderRadius: BorderRadius.circular(
-                                              4,
-                                            ),
-                                          ),
-                                          child: Text(
-                                            category,
-                                            style: const TextStyle(
-                                              fontSize: 10,
-                                              color: Colors.black54,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
+                                    subtitle: Text(
+                                      "${item['category'] ?? '-'} \nSKU: ${item['sku']}",
                                     ),
+                                    isThreeLine: true,
                                     trailing: Column(
                                       mainAxisAlignment:
                                           MainAxisAlignment.center,
@@ -447,9 +674,17 @@ class _InventoryScreenState extends State<InventoryScreen>
                                       children: [
                                         Text(
                                           "${item['stock']} Adet",
-                                          style: const TextStyle(
+                                          style: TextStyle(
                                             fontWeight: FontWeight.bold,
-                                            color: Colors.blue,
+                                            color:
+                                                (int.tryParse(
+                                                          item['stock']
+                                                              .toString(),
+                                                        ) ??
+                                                        0) <
+                                                    10
+                                                ? Colors.red
+                                                : Colors.blue,
                                           ),
                                         ),
                                         Text("${item['price']} ₺"),
@@ -480,15 +715,12 @@ class _InventoryScreenState extends State<InventoryScreen>
                                       child: cardContent,
                                     ),
                                   );
-                                } else {
-                                  return GestureDetector(
-                                    onTap: () => _addOrEdit(
-                                      product: item,
-                                      docId: doc.id,
-                                    ),
-                                    child: cardContent,
-                                  );
                                 }
+                                return GestureDetector(
+                                  onTap: () =>
+                                      _addOrEdit(product: item, docId: doc.id),
+                                  child: cardContent,
+                                );
                               },
                             ),
                     ),
