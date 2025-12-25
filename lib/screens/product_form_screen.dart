@@ -23,22 +23,51 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   final _skuCtrl = TextEditingController();
   final _stockCtrl = TextEditingController();
   final _priceCtrl = TextEditingController();
+
+  // --- YENİ EKLENEN: Kategori Değişkenleri ---
+  // Buraya istediğin kategorileri ekleyebilirsin
+  final List<String> _categories = [
+    "Genel",
+    "Elektronik",
+    "Gıda",
+    "Giyim",
+    "Kırtasiye",
+    "Yapı Market",
+    "Kozmetik",
+    "Diğer",
+  ];
+  String? _selectedCategory; // Seçilen kategori burada tutulacak
+
   bool _isLoading = false;
 
   @override
   void initState() {
     super.initState();
+    // Eğer düzenleme yapılıyorsa verileri doldur
     if (widget.existingProduct != null) {
       _nameCtrl.text = widget.existingProduct!['name']?.toString() ?? '';
       _skuCtrl.text = widget.existingProduct!['sku']?.toString() ?? '';
       _stockCtrl.text = widget.existingProduct!['stock']?.toString() ?? '0';
       _priceCtrl.text = widget.existingProduct!['price']?.toString() ?? '0.0';
-    } else if (widget.scannedSku != null) {
-      _skuCtrl.text = widget.scannedSku!;
+
+      // Kayıtlı kategoriyi getir, listede yoksa 'Genel' yap
+      String savedCategory =
+          widget.existingProduct!['category']?.toString() ?? "Genel";
+      if (_categories.contains(savedCategory)) {
+        _selectedCategory = savedCategory;
+      } else {
+        _selectedCategory = "Genel";
+      }
+    } else {
+      // Yeni ürünse varsayılan kategori
+      _selectedCategory = "Genel";
+      if (widget.scannedSku != null) {
+        _skuCtrl.text = widget.scannedSku!;
+      }
     }
   }
 
-  // --- HAREKET KAYDETME (LOGLAMA) ---
+  // --- LOGLAMA (HAREKET KAYDI) ---
   Future<void> _logMovement(String type, int qty, String name) async {
     try {
       await FirebaseFirestore.instance.collection('inventory_movements').add({
@@ -49,7 +78,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         "date": FieldValue.serverTimestamp(),
       });
     } catch (e) {
-      print("Loglama hatası: $e");
+      debugPrint("Loglama hatası: $e");
     }
   }
 
@@ -64,6 +93,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     final data = {
       "name": _nameCtrl.text.trim(),
       "sku": _skuCtrl.text.trim(),
+      "category":
+          _selectedCategory ?? "Genel", // Kategori veritabanına yazılıyor
       "stock": newStock,
       "price": newPrice,
       "updatedAt": FieldValue.serverTimestamp(),
@@ -76,7 +107,6 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             int.tryParse(widget.existingProduct!['stock'].toString()) ?? 0;
         int diff = newStock - oldStock;
 
-        // Fark varsa kaydet
         if (diff > 0) {
           await _logMovement("Giriş", diff, _nameCtrl.text);
         } else if (diff < 0) {
@@ -89,12 +119,17 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         data["createdAt"] = FieldValue.serverTimestamp();
         await collection.add(data);
 
-        // Yeni ürün giriş olarak kaydedilir
         if (newStock > 0) {
           await _logMovement("Giriş", newStock, _nameCtrl.text);
         }
       }
-      if (mounted) Navigator.pop(context);
+
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text("Kayıt Başarılı")));
+        Navigator.pop(context);
+      }
     } catch (e) {
       ScaffoldMessenger.of(
         context,
@@ -107,11 +142,14 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(widget.docId != null ? "Düzenle" : "Ekle")),
+      appBar: AppBar(
+        title: Text(widget.docId != null ? "Ürün Düzenle" : "Ürün Kaydet"),
+      ),
       body: Padding(
         padding: const EdgeInsets.all(20),
         child: SingleChildScrollView(
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               TextField(
                 controller: _nameCtrl,
@@ -120,22 +158,46 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                   border: OutlineInputBorder(),
                 ),
               ),
+
               const SizedBox(height: 12),
+
+              // --- YENİ EKLENEN: KATEGORİ SEÇİM KUTUSU ---
+              DropdownButtonFormField<String>(
+                value: _selectedCategory,
+                decoration: const InputDecoration(
+                  labelText: "Kategori",
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.category),
+                ),
+                items: _categories.map((String category) {
+                  return DropdownMenuItem<String>(
+                    value: category,
+                    child: Text(category),
+                  );
+                }).toList(),
+                onChanged: (String? newValue) {
+                  setState(() {
+                    _selectedCategory = newValue;
+                  });
+                },
+              ),
+
+              const SizedBox(height: 12),
+
               Row(
                 children: [
                   Expanded(
                     child: TextField(
                       controller: _skuCtrl,
                       decoration: const InputDecoration(
-                        labelText: "SKU",
+                        labelText: "SKU / Barkod",
                         border: OutlineInputBorder(),
                       ),
                     ),
                   ),
                   const SizedBox(width: 10),
-                  IconButton(
-                    icon: const Icon(Icons.qr_code),
-                    onPressed: () async {
+                  InkWell(
+                    onTap: () async {
                       final code = await Navigator.push(
                         context,
                         MaterialPageRoute(
@@ -144,31 +206,61 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                       );
                       if (code != null) setState(() => _skuCtrl.text = code);
                     },
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0055FF),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.qr_code_scanner,
+                        color: Colors.white,
+                      ),
+                    ),
                   ),
                 ],
               ),
+
               const SizedBox(height: 12),
+
               TextField(
                 controller: _stockCtrl,
                 decoration: const InputDecoration(
-                  labelText: "Stok",
+                  labelText: "Stok Adedi",
                   border: OutlineInputBorder(),
                 ),
                 keyboardType: TextInputType.number,
               ),
+
               const SizedBox(height: 12),
+
               TextField(
                 controller: _priceCtrl,
                 decoration: const InputDecoration(
-                  labelText: "Fiyat",
+                  labelText: "Fiyat (₺)",
                   border: OutlineInputBorder(),
                 ),
                 keyboardType: TextInputType.number,
               ),
-              const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: _isLoading ? null : _saveProduct,
-                child: const Text("KAYDET"),
+
+              const SizedBox(height: 25),
+
+              SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF0055FF),
+                  ),
+                  onPressed: _isLoading ? null : _saveProduct,
+                  child: const Text(
+                    "KAYDET",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
               ),
             ],
           ),
