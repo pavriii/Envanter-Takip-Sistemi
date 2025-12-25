@@ -1,5 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:intl/intl.dart'; // Tarih formatı için
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart'
+    as pw; // PDF widget'ları çakışmasın diye 'pw' takma adını verdik
+import 'package:printing/printing.dart'; // Yazdırma işlemi için
+
 import 'shipment_add_item_screen.dart';
 
 class ShipmentDetailScreen extends StatefulWidget {
@@ -60,6 +66,162 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
     );
   }
 
+  // --- PDF OLUŞTURMA VE YAZDIRMA ---
+  Future<void> _generateAndPrintPdf() async {
+    // 1. Verileri Çek (Bu sevkiyattaki ürünler)
+    final firestore = FirebaseFirestore.instance;
+    final itemsSnapshot = await firestore
+        .collection('shipments')
+        .doc(widget.shipmentId)
+        .collection('items')
+        .get();
+
+    if (itemsSnapshot.docs.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Yazdırılacak ürün yok!")));
+      return;
+    }
+
+    // 2. PDF Dokümanı Oluştur
+    final pdf = pw.Document();
+
+    // Türkçe Font Yükle (Roboto)
+    final font = await PdfGoogleFonts.robotoRegular();
+    final boldFont = await PdfGoogleFonts.robotoBold();
+
+    // Şu anki tarih
+    final dateStr = DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now());
+
+    // 3. Sayfa Tasarımı
+    pdf.addPage(
+      pw.Page(
+        pageTheme: pw.PageTheme(
+          theme: pw.ThemeData.withFont(base: font, bold: boldFont),
+        ),
+        build: (pw.Context context) {
+          return pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              // Başlık
+              pw.Header(
+                level: 0,
+                child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text(
+                      "SEVK İRSALİYESİ",
+                      style: pw.TextStyle(
+                        fontSize: 24,
+                        fontWeight: pw.FontWeight.bold,
+                      ),
+                    ),
+                    pw.Text("Tarih: $dateStr"),
+                  ],
+                ),
+              ),
+
+              pw.SizedBox(height: 20),
+
+              // Sevkiyat Bilgisi
+              pw.Container(
+                padding: const pw.EdgeInsets.all(10),
+                decoration: pw.BoxDecoration(border: pw.Border.all()),
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text(
+                      "Sevkiyat Kodu: ${widget.shipmentCode}",
+                      style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                    ),
+                    pw.Text("Durum: Sevkiyat Hazırlandı"),
+                  ],
+                ),
+              ),
+
+              pw.SizedBox(height: 20),
+
+              // Ürün Tablosu
+              pw.Table.fromTextArray(
+                context: context,
+                border: pw.TableBorder.all(),
+                headerStyle: pw.TextStyle(
+                  fontWeight: pw.FontWeight.bold,
+                  color: PdfColors.white,
+                ),
+                headerDecoration: const pw.BoxDecoration(color: PdfColors.blue),
+                cellAlignment: pw.Alignment.centerLeft,
+                headers: ['Ürün Adı', 'SKU / Barkod', 'Adet'],
+                data: itemsSnapshot.docs.map((doc) {
+                  final data = doc.data();
+                  return [
+                    data['name']?.toString() ?? "Bilinmiyor",
+                    data['sku']?.toString() ?? "-",
+                    "${data['qty']} Adet",
+                  ];
+                }).toList(),
+              ),
+
+              pw.SizedBox(height: 40),
+
+              // İmza Alanı
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Column(
+                    children: [
+                      pw.Text(
+                        "Teslim Eden",
+                        style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                      ),
+                      pw.SizedBox(height: 30),
+                      pw.Container(
+                        width: 100,
+                        height: 1,
+                        color: PdfColors.black,
+                      ),
+                    ],
+                  ),
+                  pw.Column(
+                    children: [
+                      pw.Text(
+                        "Teslim Alan",
+                        style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                      ),
+                      pw.SizedBox(height: 30),
+                      pw.Container(
+                        width: 100,
+                        height: 1,
+                        color: PdfColors.black,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+
+              pw.Spacer(),
+              pw.Center(
+                child: pw.Text(
+                  "Bu belge Kurumsal Envanter Sistemi tarafından otomatik oluşturulmuştur.",
+                  style: const pw.TextStyle(
+                    fontSize: 10,
+                    color: PdfColors.grey,
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    // 4. Yazdırma Ekranını Aç
+    await Printing.layoutPdf(
+      onLayout: (PdfPageFormat format) async => pdf.save(),
+      name: 'Sevkiyat_${widget.shipmentCode}.pdf',
+    );
+  }
+
   // --- ÜRÜNÜ İPTAL ET VE STOĞA GERİ YÜKLE ---
   void _deleteItemAndRestoreStock(
     String itemId,
@@ -71,7 +233,6 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
 
     try {
       await firestore.runTransaction((transaction) async {
-        // 1. Sevkiyattan sil
         DocumentReference itemRef = firestore
             .collection('shipments')
             .doc(widget.shipmentId)
@@ -79,7 +240,6 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
             .doc(itemId);
         transaction.delete(itemRef);
 
-        // 2. Stoğa geri ekle (Eğer ürün hala inventory'de varsa)
         if (productId.isNotEmpty) {
           DocumentReference productRef = firestore
               .collection('inventory')
@@ -93,7 +253,6 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
           }
         }
 
-        // 3. Hareketi "Giriş (İade)" olarak kaydet
         DocumentReference movementRef = firestore
             .collection('inventory_movements')
             .doc();
@@ -105,15 +264,17 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
         });
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Ürün sevkiyattan çıkarıldı ve stoğa iade edildi."),
-        ),
-      );
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Ürün sevkiyattan çıkarıldı ve stoğa iade edildi."),
+          ),
+        );
     } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text("Hata: $e")));
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text("Hata: $e")));
     }
   }
 
@@ -123,6 +284,13 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
       appBar: AppBar(
         title: Text(widget.shipmentCode),
         actions: [
+          // YENİ: YAZDIR BUTONU
+          IconButton(
+            icon: const Icon(Icons.print),
+            tooltip: "İrsaliye Yazdır",
+            onPressed: _generateAndPrintPdf,
+          ),
+          // DURUM GÜNCELLE BUTONU
           IconButton(
             icon: const Icon(Icons.edit_note),
             tooltip: "Durumu Değiştir",
@@ -130,7 +298,6 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
           ),
         ],
       ),
-      // Ekleme Butonu
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () {
           Navigator.push(
@@ -150,7 +317,7 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
       ),
       body: Column(
         children: [
-          // Durum Göstergesi (Canlı)
+          // Durum Göstergesi
           StreamBuilder<DocumentSnapshot>(
             stream: FirebaseFirestore.instance
                 .collection('shipments')
@@ -186,7 +353,7 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
 
           const Divider(height: 1),
 
-          // Yüklü Ürünler Listesi
+          // Liste
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
@@ -249,7 +416,6 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
                             IconButton(
                               icon: const Icon(Icons.delete, color: Colors.red),
                               onPressed: () {
-                                // Silme onayı ve işlemi
                                 showDialog(
                                   context: context,
                                   builder: (ctx) => AlertDialog(
