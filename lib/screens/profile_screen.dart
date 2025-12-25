@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'edit_profile_screen.dart'; // Profil düzenleme ekranı
-import 'change_password_screen.dart'; // Şifre değiştirme ekranı
+import 'login_screen.dart';
+import 'edit_profile_screen.dart';
+import 'change_password_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -12,241 +13,227 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  // Ayarların Durumları (Varsayılan değerler)
-  bool _notificationsEnabled = true;
-  String _selectedLanguage = "Türkçe";
+  User? user = FirebaseAuth.instance.currentUser;
+  Map<String, dynamic>? userData;
+  bool _isLoading = true;
 
-  // Dil Seçim Menüsünü Açan Fonksiyon
-  void _showLanguageSelector() {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) {
-        return Padding(
-          padding: const EdgeInsets.all(20.0),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                "Dil Seçimi",
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 10),
-              ListTile(
-                leading: const Text("🇹🇷", style: TextStyle(fontSize: 24)),
-                title: const Text("Türkçe"),
-                trailing: _selectedLanguage == "Türkçe"
-                    ? const Icon(Icons.check_circle, color: Colors.blue)
-                    : null,
-                onTap: () {
-                  setState(() => _selectedLanguage = "Türkçe");
-                  Navigator.pop(context);
-                },
-              ),
-              ListTile(
-                leading: const Text("🇬🇧", style: TextStyle(fontSize: 24)),
-                title: const Text("English"),
-                subtitle: const Text("(Yakında)"),
-                enabled: false, // Şimdilik pasif
-                trailing: _selectedLanguage == "English"
-                    ? const Icon(Icons.check_circle, color: Colors.blue)
-                    : null,
-              ),
-            ],
-          ),
-        );
-      },
-    );
+  @override
+  void initState() {
+    super.initState();
+    _getUserData();
+  }
+
+  // Kullanıcı verilerini çek (İsim, Rol, Fotoğraf vb.)
+  Future<void> _getUserData() async {
+    if (user != null) {
+      try {
+        DocumentSnapshot doc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user!.uid)
+            .get();
+        if (doc.exists) {
+          if (mounted) {
+            setState(() {
+              userData = doc.data() as Map<String, dynamic>;
+              _isLoading = false;
+            });
+          }
+        }
+      } catch (e) {
+        debugPrint("Hata: $e");
+        if (mounted) setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  // Çıkış Yap
+  Future<void> _logout() async {
+    await FirebaseAuth.instance.signOut();
+    if (mounted) {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (context) => const LoginScreen()),
+        (route) => false,
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final user = FirebaseAuth.instance.currentUser;
+    if (_isLoading) return const Center(child: CircularProgressIndicator());
+
+    String role = userData?['role'] ?? 'personel';
+    String email = user?.email ?? "";
+    String name = userData?['name'] ?? "Kullanıcı";
+    String? photoUrl = userData?['photoUrl']; // Firestore'dan gelen resim
 
     return Scaffold(
-      appBar: AppBar(title: const Center(child: Text("Hesap Ayarları"))),
-      body: StreamBuilder<DocumentSnapshot>(
-        // Firestore'daki 'users' koleksiyonunu dinliyoruz
-        stream: FirebaseFirestore.instance
-            .collection('users')
-            .doc(user?.uid)
-            .snapshots(),
-        builder: (context, snapshot) {
-          // Varsayılan Veriler
-          String displayName = user?.displayName ?? "Kullanıcı";
-          String jobTitle = "Sevkiyat Sorumlusu";
-
-          // Firestore'da veri varsa onları al
-          if (snapshot.hasData && snapshot.data!.exists) {
-            final data = snapshot.data!.data() as Map<String, dynamic>;
-            displayName = data['name'] ?? displayName;
-            jobTitle = data['job'] ?? jobTitle;
-          }
-
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              children: [
-                // Profil Resmi
-                const CircleAvatar(
-                  radius: 50,
-                  backgroundImage: NetworkImage(
-                    'https://i.pravatar.cc/150?img=12',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  displayName,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                Text(jobTitle, style: const TextStyle(color: Colors.grey)),
-                const SizedBox(height: 30),
-
-                // --- HESAP BÖLÜMÜ ---
-                _buildSection("HESAP", [
-                  ListTile(
-                    leading: const Icon(Icons.person, color: Colors.blue),
-                    title: const Text("Kişisel Bilgiler"),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const EditProfileScreen(),
-                        ),
-                      );
-                    },
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.lock, color: Colors.blue),
-                    title: const Text("Şifre ve Güvenlik"),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const ChangePasswordScreen(),
-                        ),
-                      );
-                    },
-                  ),
-                ]),
-
-                // --- TERCİHLER BÖLÜMÜ (GÜNCELLENDİ) ---
-                _buildSection("TERCİHLER", [
-                  // 1. Bildirimler (Switch Eklendi)
-                  ListTile(
-                    leading: const Icon(
-                      Icons.notifications,
-                      color: Colors.orange,
-                    ),
-                    title: const Text("Bildirimler"),
-                    trailing: Switch(
-                      value: _notificationsEnabled,
-                      activeColor: const Color(0xFF0055FF),
-                      onChanged: (bool value) {
-                        setState(() {
-                          _notificationsEnabled = value;
-                        });
-                        // İpucu: Burada ileride bu ayarı kaydedebilirsiniz.
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              value
-                                  ? "Bildirimler Açıldı"
-                                  : "Bildirimler Kapatıldı",
-                            ),
-                            duration: const Duration(seconds: 1),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-
-                  // 2. Dil Seçimi (Tıklanabilir Eklendi)
-                  ListTile(
-                    leading: const Icon(Icons.language, color: Colors.purple),
-                    title: const Text("Dil"),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          _selectedLanguage,
-                          style: const TextStyle(
-                            color: Colors.grey,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        const Icon(
-                          Icons.chevron_right,
-                          size: 20,
-                          color: Colors.grey,
+      appBar: AppBar(title: const Text("Hesabım")),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          children: [
+            // --- PROFİL FOTOĞRAFI ALANI ---
+            Center(
+              child: Stack(
+                children: [
+                  Container(
+                    width: 120,
+                    height: 120,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: const Color(0xFF0055FF),
+                        width: 4,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.1),
+                          blurRadius: 10,
                         ),
                       ],
-                    ),
-                    onTap: _showLanguageSelector, // Menüyü aç
-                  ),
-                ]),
-
-                const SizedBox(height: 20),
-                SizedBox(
-                  width: double.infinity,
-                  height: 50,
-                  child: OutlinedButton(
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: Colors.red),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                      image: DecorationImage(
+                        fit: BoxFit.cover,
+                        image: photoUrl != null && photoUrl.isNotEmpty
+                            ? NetworkImage(photoUrl)
+                            : const AssetImage('assets/default_avatar.png')
+                                  as ImageProvider,
+                        // Not: assets klasöründe resim yoksa NetworkImage hata verebilir,
+                        // basitlik için Icon kullanalım:
                       ),
                     ),
-                    onPressed: () async {
-                      await FirebaseAuth.instance.signOut();
-                    },
-                    child: const Text(
-                      "Çıkış Yap",
-                      style: TextStyle(
-                        color: Colors.red,
-                        fontWeight: FontWeight.bold,
+                    // Eğer resim yoksa ikon göster
+                    child: (photoUrl == null || photoUrl.isEmpty)
+                        ? const Icon(Icons.person, size: 60, color: Colors.grey)
+                        : null,
+                  ),
+                  Positioned(
+                    bottom: 0,
+                    right: 0,
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF0055FF),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.edit,
+                        color: Colors.white,
+                        size: 20,
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          );
-        },
+
+            const SizedBox(height: 16),
+
+            // İsim ve Rol
+            Text(
+              name,
+              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 4),
+            Text(email, style: const TextStyle(color: Colors.grey)),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                color: role == 'admin'
+                    ? Colors.red.withOpacity(0.1)
+                    : Colors.blue.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                role.toUpperCase(),
+                style: TextStyle(
+                  color: role == 'admin' ? Colors.red : Colors.blue,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 30),
+
+            // --- MENÜLER ---
+            _buildProfileOption(
+              icon: Icons.person_outline,
+              title: "Profili Düzenle",
+              onTap: () async {
+                // Düzenleme ekranına git ve dönünce sayfayı yenile
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const EditProfileScreen(),
+                  ),
+                );
+                _getUserData(); // Verileri güncelle
+              },
+            ),
+            _buildProfileOption(
+              icon: Icons.lock_outline,
+              title: "Şifre Değiştir",
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const ChangePasswordScreen(),
+                  ),
+                );
+              },
+            ),
+            _buildProfileOption(
+              icon: Icons.notifications_outlined,
+              title: "Bildirim Ayarları",
+              onTap: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("Yakında eklenecek...")),
+                );
+              },
+            ),
+            const Divider(),
+            _buildProfileOption(
+              icon: Icons.logout,
+              title: "Çıkış Yap",
+              textColor: Colors.red,
+              onTap: _logout,
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildSection(String title, List<Widget> children) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Padding(
-        padding: const EdgeInsets.only(left: 8, bottom: 8),
-        child: Text(
-          title,
-          style: const TextStyle(
-            color: Colors.grey,
-            fontSize: 12,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      ),
-      Container(
-        margin: const EdgeInsets.only(bottom: 24),
+  Widget _buildProfileOption({
+    required IconData icon,
+    required String title,
+    required VoidCallback onTap,
+    Color textColor = Colors.black,
+  }) {
+    return ListTile(
+      onTap: onTap,
+      contentPadding: const EdgeInsets.symmetric(vertical: 4),
+      leading: Container(
+        padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
+          color: Colors.grey[100],
+          borderRadius: BorderRadius.circular(8),
         ),
-        child: Column(children: children),
+        child: Icon(
+          icon,
+          color: textColor == Colors.red ? Colors.red : const Color(0xFF0055FF),
+        ),
       ),
-    ],
-  );
+      title: Text(
+        title,
+        style: TextStyle(fontWeight: FontWeight.bold, color: textColor),
+      ),
+      trailing: const Icon(
+        Icons.arrow_forward_ios,
+        size: 16,
+        color: Colors.grey,
+      ),
+    );
+  }
 }
