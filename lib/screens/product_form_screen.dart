@@ -24,8 +24,6 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   final _stockCtrl = TextEditingController();
   final _priceCtrl = TextEditingController();
 
-  // --- YENİ EKLENEN: Kategori Değişkenleri ---
-  // Buraya istediğin kategorileri ekleyebilirsin
   final List<String> _categories = [
     "Genel",
     "Elektronik",
@@ -36,21 +34,22 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     "Kozmetik",
     "Diğer",
   ];
-  String? _selectedCategory; // Seçilen kategori burada tutulacak
+  String? _selectedCategory;
+
+  // YENİ: TEDARİKÇİ SEÇİMİ İÇİN
+  String? _selectedSupplierName;
 
   bool _isLoading = false;
 
   @override
   void initState() {
     super.initState();
-    // Eğer düzenleme yapılıyorsa verileri doldur
     if (widget.existingProduct != null) {
       _nameCtrl.text = widget.existingProduct!['name']?.toString() ?? '';
       _skuCtrl.text = widget.existingProduct!['sku']?.toString() ?? '';
       _stockCtrl.text = widget.existingProduct!['stock']?.toString() ?? '0';
       _priceCtrl.text = widget.existingProduct!['price']?.toString() ?? '0.0';
 
-      // Kayıtlı kategoriyi getir, listede yoksa 'Genel' yap
       String savedCategory =
           widget.existingProduct!['category']?.toString() ?? "Genel";
       if (_categories.contains(savedCategory)) {
@@ -59,7 +58,6 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         _selectedCategory = "Genel";
       }
     } else {
-      // Yeni ürünse varsayılan kategori
       _selectedCategory = "Genel";
       if (widget.scannedSku != null) {
         _skuCtrl.text = widget.scannedSku!;
@@ -67,12 +65,23 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     }
   }
 
-  // --- LOGLAMA (HAREKET KAYDI) ---
-  Future<void> _logMovement(String type, int qty, String name) async {
+  // --- HAREKET KAYDI (GELİŞMİŞ) ---
+  Future<void> _logMovement(
+    String type,
+    int qty,
+    String name, {
+    String? supplier,
+  }) async {
     try {
+      // Eğer tedarikçi seçildiyse ismini loga ekle
+      String descName = name;
+      if (supplier != null && supplier.isNotEmpty) {
+        descName = "$name ($supplier'dan)";
+      }
+
       await FirebaseFirestore.instance.collection('inventory_movements').add({
         "type": type,
-        "productName": name,
+        "productName": descName,
         "sku": _skuCtrl.text,
         "quantity": qty,
         "date": FieldValue.serverTimestamp(),
@@ -93,8 +102,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     final data = {
       "name": _nameCtrl.text.trim(),
       "sku": _skuCtrl.text.trim(),
-      "category":
-          _selectedCategory ?? "Genel", // Kategori veritabanına yazılıyor
+      "category": _selectedCategory ?? "Genel",
       "stock": newStock,
       "price": newPrice,
       "updatedAt": FieldValue.serverTimestamp(),
@@ -108,7 +116,13 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         int diff = newStock - oldStock;
 
         if (diff > 0) {
-          await _logMovement("Giriş", diff, _nameCtrl.text);
+          // Stok arttıysa Giriş (Tedarikçi bilgisiyle)
+          await _logMovement(
+            "Giriş",
+            diff,
+            _nameCtrl.text,
+            supplier: _selectedSupplierName,
+          );
         } else if (diff < 0) {
           await _logMovement("Çıkış", diff.abs(), _nameCtrl.text);
         }
@@ -120,7 +134,13 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         await collection.add(data);
 
         if (newStock > 0) {
-          await _logMovement("Giriş", newStock, _nameCtrl.text);
+          // İlk giriş (Tedarikçi bilgisiyle)
+          await _logMovement(
+            "Giriş",
+            newStock,
+            _nameCtrl.text,
+            supplier: _selectedSupplierName,
+          );
         }
       }
 
@@ -158,10 +178,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                   border: OutlineInputBorder(),
                 ),
               ),
-
               const SizedBox(height: 12),
 
-              // --- YENİ EKLENEN: KATEGORİ SEÇİM KUTUSU ---
               DropdownButtonFormField<String>(
                 value: _selectedCategory,
                 decoration: const InputDecoration(
@@ -169,17 +187,64 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                   border: OutlineInputBorder(),
                   prefixIcon: Icon(Icons.category),
                 ),
-                items: _categories.map((String category) {
-                  return DropdownMenuItem<String>(
-                    value: category,
-                    child: Text(category),
-                  );
-                }).toList(),
-                onChanged: (String? newValue) {
-                  setState(() {
-                    _selectedCategory = newValue;
-                  });
-                },
+                items: _categories
+                    .map(
+                      (val) => DropdownMenuItem(value: val, child: Text(val)),
+                    )
+                    .toList(),
+                onChanged: (val) => setState(() => _selectedCategory = val),
+              ),
+              const SizedBox(height: 12),
+
+              // --- YENİ TEDARİKÇİ SEÇİMİ ---
+              // Sadece stoğun arttığı durumlarda veya yeni üründe tedarikçi sormak mantıklıdır
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.orange[50],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.orange.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      "Tedarikçi (Stok Girişi İçin)",
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.orange,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    StreamBuilder<QuerySnapshot>(
+                      stream: FirebaseFirestore.instance
+                          .collection('contacts')
+                          .where('type', isEqualTo: 'Tedarikçi')
+                          .snapshots(),
+                      builder: (context, snapshot) {
+                        if (!snapshot.hasData)
+                          return const LinearProgressIndicator();
+                        var docs = snapshot.data!.docs;
+
+                        return DropdownButtonFormField<String>(
+                          value:
+                              null, // Her girişte sıfırlansın, zorunlu olmasın
+                          hint: const Text("Tedarikçi Seç (Opsiyonel)"),
+                          isExpanded: true,
+                          items: docs.map((doc) {
+                            return DropdownMenuItem(
+                              value: doc['name'].toString(),
+                              child: Text(doc['name']),
+                            );
+                          }).toList(),
+                          onChanged: (val) {
+                            setState(() => _selectedSupplierName = val);
+                          },
+                        );
+                      },
+                    ),
+                  ],
+                ),
               ),
 
               const SizedBox(height: 12),
@@ -231,9 +296,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                 ),
                 keyboardType: TextInputType.number,
               ),
-
               const SizedBox(height: 12),
-
               TextField(
                 controller: _priceCtrl,
                 decoration: const InputDecoration(
