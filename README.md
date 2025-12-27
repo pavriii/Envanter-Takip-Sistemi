@@ -10,7 +10,6 @@ Geleneksel kağıt/kalem yöntemlerinin yarattığı veri kaybını önlemek, ba
 * **Hızlı İşlem:** Barkod/QR tarama ve Excel'den toplu ürün yükleme.
 * **Sevkiyat Takibi:** Müşteri, şoför ve plaka takibi ile hatasız lojistik.
 * **Raporlama:** Otomatik PDF İrsaliye oluşturma ve çıktı alma.
-* **Modern Arayüz:** Karanlık Mod (Dark Mode) desteği ve gelişmiş filtreleme.
 
 ---
 
