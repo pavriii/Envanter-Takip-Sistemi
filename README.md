@@ -10,6 +10,7 @@ Geleneksel kağıt/kalem yöntemlerinin yarattığı veri kaybını önlemek, ba
 * **Hızlı İşlem:** Barkod/QR tarama ve Excel'den toplu ürün yükleme.
 * **Sevkiyat Takibi:** Müşteri, şoför ve plaka takibi ile hatasız lojistik.
 * **Raporlama:** Otomatik PDF İrsaliye oluşturma ve çıktı alma.
+* **Modern Arayüz:** Karanlık Mod (Dark Mode) desteği ve gelişmiş filtreleme.
 
 ---
 
@@ -37,8 +38,11 @@ Kullanıcı dostu giriş ekranı ve güvenli hesap yönetimi.
 | :---: | :---: |
 | ![Envanter](screenshots/Envanter.png) | ![Ürün Kaydet](screenshots/Ürün%20kaydet.png) |
 
-![Envanter Hareketleri](screenshots/Envanter%20hareket.png)
-*Envanter hareket dökümü*
+<div align="center">
+  <img src="screenshots/Envanter%20hareket.png" alt="Envanter Hareketleri" />
+  <br>
+  <em>Envanter hareket dökümü</em>
+</div>
 
 ---
 
@@ -49,12 +53,17 @@ Sevkiyatların planlandığı ve cari hesapların yönetildiği modül.
 | :---: | :---: |
 | ![Sevkiyatlar](screenshots/Sevkiyatlar.png) | ![Sevkiyat Bilgileri](screenshots/Sevkiyat%20bilgileri.png) |
 
-![Cari Hesaplar](screenshots/Cari%20hesaplar.png)
-*Cari Hesap Yönetimi*
+<div align="center">
+  <img src="screenshots/Cari%20hesaplar.png" alt="Cari Hesaplar" />
+  <br>
+  <em>Cari Hesap Yönetimi</em>
+</div>
 
 ---
 
 ### ⚙️ Yönetim Paneli
 Yöneticiler için genel bakış ve kontrol ekranı.
 
-![Yönetim Ekranı](screenshots/Yönetim%20ekranı.png)
+| Yönetim Ekranı |
+| :---: |
+| ![Yönetim Ekranı](screenshots/Yönetim%20ekranı.png) |
